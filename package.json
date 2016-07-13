@@ -7,7 +7,7 @@
     "grunt2gulp": "bin/grunt2gulp.js"
   },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "bash docker-test-examples.sh"
   },
   "keywords": [
     "grunt",
