@@ -64,6 +64,38 @@ task running capability and all the other stuff.
 The core functions you will want to check out are `processGruntTask`
 and `processGruntConfig`.
 
+### Using Docker for Testing
+
+Build the image:
+
+    docker build -t omouse/grunt2gulp.js .
+
+Run a container with the Gruntfile to test:
+
+    mkdir cool
+    touch cool/Gruntfile.js
+    docker run --rm -v $(realpath .):/data/package omouse/grunt2gulp.js
+
+This will mount the `cool` directory to `/data/package` into the
+container. The container will run the grunt2gulp command using
+Gruntfile.js as input and output gulpfile.js into the `cool`
+directory.
+
+The `--rm` will delete the container after it's done running.
+
+To use docker for testing grunt2gulp on different files you can use
+`npm test`.
+
+This requires that Docker is installed and that you have built the
+image. It also requires GNU Coreutils and `realpath` command. On Mac
+OS X you can use brew install coreutils.
+
+### Adding new gruntfile examples
+
+1. Create a new directory in the `examples/` directory
+1. Create the Gruntfile.js in that new directory
+1. Add a new line to `docker-test-examples.sh`
+
 ## How to Report Issues
 
 When reporting an issue with grunt2gulp.js, please try to include the Gruntfile that you were trying to convert and the error message that you received.
