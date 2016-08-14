@@ -1,5 +1,7 @@
 # grunt2gulp
 
+[![Flattr This](http://button.flattr.com/flattr-badge-large.png)](https://flattr.com/submit/auto?fid=y0jx3j&url=https%3A%2F%2Fgithub.com%2Fomouse%2Fgrunt2gulp.js)
+
 ![Grunt2Gulp Logo](https://github.com/omouse/grunt2gulp.js/blob/master/grunt2gulp-logo.png)
 
 [![Codacy Badge](https://api.codacy.com/project/badge/7174ac139c9e42fabec2ebc1df48de8a)](https://www.codacy.com/app/omouse/grunt2gulp-js)
