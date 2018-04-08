@@ -72,13 +72,21 @@ function out(str) {
  * @classdesc Class for converting grunt files to gulp
  */
 function gruntConverter(gruntModule) {
+  var gruntRequired = false;
 
   function printExtroCode(){
     let lines = gruntModule.toString().split('\n');
-    let end = lines.findIndex( line => {
+    let end = lines.find( line => {
       return /grunt\.initConfig\(/g.test(line)
     } )
-    out('\n' + lines.slice(1,end).join('\n') + '\n')
+    let gruntNeed =  lines.find( line =>{
+      return /grunt\./g.test(line)
+    });
+    if (gruntNeed){
+      out("var grunt = require('grunt');");
+      gruntRequired = true;
+    }
+    out(lines.slice(1,end).join('\n'))
   }
   
   /**
@@ -211,7 +219,7 @@ function gruntConverter(gruntModule) {
    * @param {String} dest The destination file. When this is set to 'files', the destination is not set for the added gulp task.
    * @inner
    */
-  function processGruntTask(taskName, src, dest, options) {
+  function processGruntTask(taskName, src, dest, options, taskTasks ) {
     var file, gulpTask;
 
     if (Array.isArray(src)) {
@@ -229,6 +237,7 @@ function gruntConverter(gruntModule) {
         taskNames.push(gulpTask.name);
       }
       gulpTask.options = options;
+      gulpTask.tasks = taskTasks;
       tasks.push(gulpTask);
     } else {
       for (file in src) {
@@ -247,6 +256,7 @@ function gruntConverter(gruntModule) {
             taskNames.push(gulpTask.name);
           }
           gulpTask.options = options;
+          gulpTask.tasks = taskTasks;
           tasks.push(gulpTask);
         }
       }
@@ -324,7 +334,11 @@ function gruntConverter(gruntModule) {
             src = src.concat(options[option].src);
             dest.push(option);
           }
-          processGruntTask(taskName + ":" + option, src, dest ,typeof options[option]['options'] === 'object' ? options[option]['options'] : {} );
+          let
+            taskOptions = 'options' in options[option] && is.object(options[option]['options']) ? options[option]['options'] : {},
+            taskTasks = 'tasks' in options[option] && is.array(options[option]['tasks']) ? options[option]['tasks'] : [];
+
+          processGruntTask(taskName + ":" + option, src, dest, taskOptions, taskTasks);
         }
       }
     } else if (typeof options === 'string') {
@@ -369,7 +383,9 @@ function gruntConverter(gruntModule) {
       out("var " + camelCase(moduleName) + " = require('" + name + "');");
     }catch(e){
       debug(`'${name}' is not in the npm registry,will using grunt.loadNpmTasks('grunt-${moduleName}')`);
+      if(!gruntRequired)
       out("var grunt = require('grunt');");
+      gruntRequired = true;
       out("grunt.loadNpmTasks('grunt-" + moduleName + "');");
     }
   }
@@ -400,7 +416,7 @@ function gruntConverter(gruntModule) {
       duplicate = ' // WARNING: potential duplicate task';
     }
     if ('dependencies' in task) {
-      out("gulp.task('" + task.name + "', " + JSON.stringify(task.dependencies) + ");");
+      out("gulp.task('" + task.name + "', gulp.series(" + JSON.stringify(task.dependencies) + "));");
     } else {
       out("gulp.task('" + task.name + "', function () {" + duplicate);
     
@@ -446,6 +462,7 @@ function gruntConverter(gruntModule) {
         if (pluginName in taskPrinters) {
           verbose('Found task in taskPrinters: ' + task.name);
           taskPrinters[pluginName](task);
+          out("    .pipe(gulp.dest('" + path.dirname(task.dest) + "'))");
         } else if ('dest' in task && task.dest !== undefined) {
           verbose('Printing task destination: ' + task.name);
           out("    .pipe(gulp.dest('" + task.dest + "'))");
@@ -471,7 +488,7 @@ function gruntConverter(gruntModule) {
    */
   function printWatchTask(task) {
     out("gulp.task('" + task.name + "', function () {");
-    out("  gulp.watch('" + JSON.stringify(task.src) + "', [ /* dependencies */ ]);");
+    out("  gulp.watch(" + JSON.stringify(task.src) + ", " + JSON.stringify(task.tasks) + ");");
     out("});");
   }
 
@@ -511,6 +528,14 @@ function gruntConverter(gruntModule) {
       printDefinition(definitions[i]);
     }
     out();
+    let needMerge = tasks.find( task => {
+      return task.dest !== undefined && is.array(task.dest)
+    });
+    if(needMerge){
+      out('// npm install --save-dev gulp@next merge-stream');
+      out("var merge = require('merge-stream');");
+      out();
+    }
 
     for (let i = 0; i < tasks.length; i += 1) {
       if (tasks[i].name.startsWith('watch')) {
