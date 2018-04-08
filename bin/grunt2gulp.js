@@ -7,6 +7,8 @@
 
 var fs = require('fs');
 var path = require('path');
+const { execSync } = require('child_process');
+const is = require('is_js');
 
 /**
  * Whether or not debug mode is on
@@ -38,7 +40,7 @@ function usage() {
  */
 function debug(str) {
   if (DEBUG) {
-    console.error("DEBUG:", str);
+    console.error.apply(null,["DEBUG:"].concat(Array.prototype.slice.apply(arguments)))
   }
 }
 
@@ -69,7 +71,16 @@ function out(str) {
  * @class gruntConverter
  * @classdesc Class for converting grunt files to gulp
  */
-function gruntConverter() {
+function gruntConverter(gruntModule) {
+
+  function printExtroCode(){
+    let lines = gruntModule.toString().split('\n');
+    let end = lines.findIndex( line => {
+      return /grunt\.initConfig\(/g.test(line)
+    } )
+    out('\n' + lines.slice(1,end).join('\n') + '\n')
+  }
+  
   /**
    * The list of Grunt tasks
    * @inner
@@ -135,30 +146,62 @@ function gruntConverter() {
    */
   var taskPrinters = Object.create(null);
 
+  function getTaskOption(task){
+    let option = is.empty(task.options ) ? "" : JSON.stringify(task.options)
+    return option;
+  }
+
   taskPrinters['jshint'] = function jshint() {
     pipe("jshint()");
     pipe("jshint.reporter('default')");
   }
 
   taskPrinters['uglify'] = function uglify(task) {
-    pipe("rename('all.min.js')");
-    pipe("uglify()");
-    dest(path.dirname(task.dest));
+    let option = getTaskOption(task);
+    pipe(`uglify(${option})`);
+    // pipe("rename({suffix: '.min'})")
+    dest(task.dest);
   }
 
   taskPrinters['concat'] = function concat(task) {
-    pipe("concat('all.js')");
-    dest(path.dirname(task.dest));
+    let option = getTaskOption(task);
+    // pipe("concat('all.js')");
+    pipe(`concat(${option})`);
+    dest(task.dest);
+  }
+
+  taskPrinters['replace'] = function replace(task) {
+    task.options.patterns.forEach( p => {
+      let pattern = p.match,replacement = p.replacement
+      pipe(`replace(${pattern},${replacement})`);
+    })
+    
+    dest(task.dest);
   }
   
   taskPrinters['wiredep'] = function wiredep(task) {
     pipe('wiredep()');
-    dest(path.dirname(task.dest));
+    dest(task.dest);
   }
   
   taskPrinters['filerev'] = function filerev(task) {
     // TODO: #15 custom filerev taskPrinter
   }
+
+  taskPrinters['less'] = function (task) {
+    let option = getTaskOption(task);
+    pipe(`less(${option})`);
+    dest(task.dest);
+  }
+
+  taskPrinters['cssmin'] = function (task) {
+    let option = getTaskOption(task);
+    pipe(`cssmin(${option})`);
+    pipe("rename({suffix: '.min'})")
+    dest(task.dest);
+  }
+
+   
 
   /**
    * Processing grunt tasks into gulp tasks and adds them to [taskNames]{@link module:grunt2gulp~gruntConverter~taskNames}. Detects any potential duplicate tasks.
@@ -168,27 +211,47 @@ function gruntConverter() {
    * @param {String} dest The destination file. When this is set to 'files', the destination is not set for the added gulp task.
    * @inner
    */
-  function processGruntTask(taskName, src, dest) {
+  function processGruntTask(taskName, src, dest, options) {
     var file, gulpTask;
-    for (file in src) {
-      if (src.hasOwnProperty(file)) {
-        gulpTask = Object.create(null);
-        gulpTask.name = taskName;
-        gulpTask.src = src[file];
-        if (dest !== 'files') {
-          gulpTask.dest = dest;
-        }
 
-        // check for duplicate gulp task names
-        if (taskNames.indexOf(gulpTask.name) !== -1) {
-          gulpTask._isDuplicate = true;
-        } else {
-          taskNames.push(gulpTask.name);
-        }
+    if (Array.isArray(src)) {
+      gulpTask = Object.create(null);
+      gulpTask.name = taskName;
+      gulpTask.src = src;
+      if (dest !== 'files') {
+        gulpTask.dest = typeof dest === "object" && dest.length === 1 ? dest[0] : dest;
+      }
 
-        tasks.push(gulpTask);
+      // check for duplicate gulp task names
+      if (taskNames.indexOf(gulpTask.name) !== -1) {
+        gulpTask._isDuplicate = true;
+      } else {
+        taskNames.push(gulpTask.name);
+      }
+      gulpTask.options = options;
+      tasks.push(gulpTask);
+    } else {
+      for (file in src) {
+        if (src.hasOwnProperty(file)) {
+          gulpTask = Object.create(null);
+          gulpTask.name = taskName;
+          gulpTask.src = src[file];
+          if (dest !== 'files') {
+            gulpTask.dest = typeof dest === "object" ? dest[file] : dest;
+          }
+
+          // check for duplicate gulp task names
+          if (taskNames.indexOf(gulpTask.name) !== -1) {
+            gulpTask._isDuplicate = true;
+          } else {
+            taskNames.push(gulpTask.name);
+          }
+          gulpTask.options = options;
+          tasks.push(gulpTask);
+        }
       }
     }
+
   }
 
   /**
@@ -203,41 +266,54 @@ function gruntConverter() {
    * @inner
    */
   function processGruntConfig(taskName, options) {
-    var key, option, src, dest;
+    var key, option, src = [], dest = [];
     function processFileList(fileList) {
-      for (var i = 0; i < fileList.length; i += 1) {
-        src.push(fileList[i].src);
-        dest.push(fileList[i].dest);
+      for (let i = 0; i < fileList.length; i += 1) {
+        if(typeof fileList[i] == 'object' ){
+          src = src.concat(fileList[i].src);
+          dest.push(fileList[i].dest);
+        }else{
+          src = src.concat(fileList[i]);
+          // dest.push(fileList[i]);
+        }
+       
       }
     }
     if (typeof options === 'object') {
       for (option in options) {
-        if (option === 'options') {
+
+        if (option === 'options' || taskName == 'pkg') {
           continue;
         } else {
-          src = undefined;
-          dest = undefined;
+
           if (typeof(options[option]) === 'string') {
             // @todo handle this case
             out('// TODO: ' + option + ', ' + options[option]);
           } else if ('src' in options[option]) {
             if (typeof options[option].src === 'string') {
-              src = [options[option].src];
+              src.push(options[option].src);
             } else {
-              src = options[option].src;
+              src = src.concat(options[option].src);
             }
-            dest = options[option].dest;
+            dest.push(options[option].dest);
           } else if ('files' in options[option]) {
             if (typeof options[option].files === 'string') {
-              src = [options[option].files];
+              src = src.push(options[option].files);
+            } else if (Array.isArray(options[option].files)){
+              processFileList(options[option].files);
             } else {
-              src = [];
-              dest = [];
               for (key in options[option].files) {
-                if (typeof options[option].files[key] === 'object') {
-                  processFileList(options[option].files[key]);
+                 let fileList = options[option].files[key];
+                if (Array.isArray(fileList)){
+                  let fileList = options[option].files[key];
+                  for (let i = 0; i < fileList.length; i += 1) {
+                    src.push(fileList[i]);
+                    dest.push(fileList[i]);
+                  }
+                } else if(typeof fileList === 'object') {
+                  processFileList(fileList);
                 } else {
-                  src.push(options[option].files[key]);
+                  src.push(fileList);
                   dest.push(key);
                 }
               }
@@ -245,10 +321,10 @@ function gruntConverter() {
           } else {
             // option is the destination path
             // options[option] is the list of source files
-            src = [options[option]];
-            dest = option;
+            src = src.concat(options[option].src);
+            dest.push(option);
           }
-          processGruntTask(taskName, src, dest);
+          processGruntTask(taskName + ":" + option, src, dest ,typeof options[option]['options'] === 'object' ? options[option]['options'] : {} );
         }
       }
     } else if (typeof options === 'string') {
@@ -267,7 +343,9 @@ function gruntConverter() {
    * @inner
    */
   function printDefinition(definition) {
-    out("var " + definition.name + " = " + definition.value + ";");
+
+    var value = typeof definition.value === "string" ? definition.value.replace(/\n/g,"") : definition.value;
+    out("var " + definition.name + " = " + value + ";");
   }
 
   /**
@@ -281,9 +359,19 @@ function gruntConverter() {
   function printRequire(moduleName) {
     var name = moduleName;
     if (moduleName !== 'gulp') {
-      name = 'gulp-' + moduleName;
+        name = 'gulp-' + moduleName;
     }
-    out("var " + camelCase(moduleName) + " = require('" + name + "');");
+    try{
+      execSync('npm info ' + name,{
+        stdio: 'ignore'
+      });
+      
+      out("var " + camelCase(moduleName) + " = require('" + name + "');");
+    }catch(e){
+      debug(`'${name}' is not in the npm registry,will using grunt.loadNpmTasks('grunt-${moduleName}')`);
+      out("var grunt = require('grunt');");
+      out("grunt.loadNpmTasks('grunt-" + moduleName + "');");
+    }
   }
 
   /**
@@ -316,15 +404,16 @@ function gruntConverter() {
     } else {
       out("gulp.task('" + task.name + "', function () {" + duplicate);
       out("  return gulp");
-      out("    .src('" + task.src + "')");
-      if (task.name in taskPrinters) {
+      out("    .src(" + JSON.stringify( task.src ) + ")");
+      let pluginName = task.name.split(":")[0]
+      if (pluginName in taskPrinters) {
         verbose('Found task in taskPrinters: ' + task.name);
-        taskPrinters[task.name](task);
+        taskPrinters[pluginName](task);
       } else if ('dest' in task && task.dest !== undefined) {
         verbose('Printing task destination: ' + task.name);
-        console.log("    .pipe(gulp.dest('" + task.dest + "'))");
+        out("    .pipe(gulp.dest('" + task.dest + "'))");
       } else {
-        debug('Task not found in taskPrinters or destination file is ' +
+        verbose('Task not found in taskPrinters or destination file is ' +
           'undefined: ' + task.name + ', ' + task.dest);
       }
       out("  ;");
@@ -372,18 +461,19 @@ function gruntConverter() {
   this.print = function() {
     var i;
     printRequire('gulp');
-    for (i = 0; i < requires.length; i += 1) {
+    printExtroCode();
+    for (let i = 0; i < requires.length; i += 1) {
       printRequire(requires[i]);
     }
     out();
 
-    for (i = 0; i < definitions.length; i += 1) {
+    for (let i = 0; i < definitions.length; i += 1) {
       printDefinition(definitions[i]);
     }
     out();
 
-    for (i = 0; i < tasks.length; i += 1) {
-      if (tasks[i].name === 'watch') {
+    for (let i = 0; i < tasks.length; i += 1) {
+      if (tasks[i].name.startsWith('watch')) {
         printWatchTask(tasks[i]);
       } else if (tasks[i].name === 'karma') {
         printKarmaTask(tasks[i]);
@@ -406,7 +496,11 @@ function gruntConverter() {
     /**
      * Does nothing.
      */
-    readJSON: function() {
+    readJSON: function(filePath) {
+      return JSON.parse(fs.readFileSync(path.resolve(filePath), 'utf-8'));
+    },
+    read: function(filePath){
+      return fs.readFileSync(path.resolve(filePath), 'utf-8');
     }
   }
 
@@ -507,7 +601,7 @@ function lintGruntFile(gruntFilename) {
  * @param {String} filename The Gruntfile to load
  */
 function convertGruntFile(filename) {
-  var module = require(filename), converter = new gruntConverter();
+  var module = require(filename), converter = new gruntConverter(module);
   module(converter);
   converter.print();
 }
