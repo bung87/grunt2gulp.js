@@ -264,14 +264,11 @@ function gruntConverter(gruntModule) {
    * @inner
    */
   function processGruntTask(taskName, src, dest, options, taskTasks ) {
-    var file, gulpTask;
-
-    if (Array.isArray(src)) {
-      gulpTask = Object.create(null);
+      let gulpTask = Object.create(null);
       gulpTask.name = taskName;
       gulpTask.src = src;
       if (dest !== 'files') {
-        gulpTask.dest = typeof dest === "object" && dest.length === 1 ? dest[0] : dest;
+        gulpTask.dest = is.array(dest) && dest.length === 1 ? dest[0] : dest;
       }
 
       // check for duplicate gulp task names
@@ -283,29 +280,20 @@ function gruntConverter(gruntModule) {
       gulpTask.options = options;
       gulpTask.tasks = taskTasks;
       tasks.push(gulpTask);
-    } else {
-      for (file in src) {
-        if (src.hasOwnProperty(file)) {
-          gulpTask = Object.create(null);
-          gulpTask.name = taskName;
-          gulpTask.src = src[file];
-          if (dest !== 'files') {
-            gulpTask.dest = typeof dest === "object" ? dest[file] : dest;
-          }
+  }
 
-          // check for duplicate gulp task names
-          if (taskNames.indexOf(gulpTask.name) !== -1) {
-            gulpTask._isDuplicate = true;
-          } else {
-            taskNames.push(gulpTask.name);
-          }
-          gulpTask.options = options;
-          gulpTask.tasks = taskTasks;
-          tasks.push(gulpTask);
-        }
+  function processFileList(fileList) {
+    let src = [], dest = [];
+    fileList.forEach(v => {
+      if (is.object(v)) {
+        src = src.concat(v.src);
+        dest.push(v.dest);
+      } else {
+        src = src.concat(v);
+        dest.push(v);
       }
-    }
-
+    })
+    return [src, dest]
   }
 
   /**
@@ -320,22 +308,9 @@ function gruntConverter(gruntModule) {
    * @inner
    */
   function processGruntConfig(taskName, options) {
-    var key, option
-    function processFileList(fileList) {
-      let src = [], dest = [];
-      fileList.forEach( v => {
-        if (is.object(v)) {
-          src = src.concat(v.src);
-          dest.push(v.dest);
-        } else {
-          src = src.concat(v);
-          dest.push(v);
-        }
-      })
-      return [src,dest]
-    }
-    if (typeof options === 'object') {
-      for (option in options) {
+  
+    if (is.object(options)) {
+      for (let option in options) {
         let src = [], dest = [];
 
         if (option === 'options' || taskName == 'pkg') {
@@ -355,23 +330,19 @@ function gruntConverter(gruntModule) {
           } else if ('files' in options[option]) {
             if (typeof options[option].files === 'string') {
               src = src.push(options[option].files);
-            } else if (Array.isArray(options[option].files)){
+            } else if (is.array(options[option].files)){
               let [src1,dest1] = processFileList(options[option].files);
               src = src.concat(src1)
               dest = dest.concat(dest1)
-            } else {
-              for (key in options[option].files) {
+            } else if(is.object(options[option].files)){
+              for (let key in options[option].files) {
                  let fileList = options[option].files[key];
-                if (Array.isArray(fileList)){
+                if (is.array(fileList)){
                   let fileList = options[option].files[key];
                   for (let i = 0; i < fileList.length; i += 1) {
                     src.push(fileList[i]);
                     dest.push(fileList[i]);
                   }
-                } else if(typeof fileList === 'object') {
-                  let [src1,dest1] = processFileList(fileList);
-                  src = src.concat(src1)
-                  dest = dest.concat(dest1)
                 } else {
                   src.push(fileList);
                   dest.push(key);
@@ -471,30 +442,29 @@ function gruntConverter(gruntModule) {
       out("gulp.task('" + task.name + "', gulp.series(" + JSON.stringify(task.dependencies) + "));");
     } else {
       out("gulp.task('" + task.name + "', function () {" + duplicate);
-    
-      if('dest' in task && is.array(task.dest) ){
+
+      if ('dest' in task && is.array(task.dest)) {
         out("  return merge(");
         //task no needs rename
-        let taskDestBaseNameSameAsSrc = task.dest.filter( (x,index) =>{
-          // let ext = path.extname(x);
+        let taskDestBaseNameSameAsSrc = task.dest.filter((x, index) => {
           return path.basename(x) == path.basename(task.src[index])
-        }) 
+        })
         let pairsGroups = {}
-        taskDestBaseNameSameAsSrc.forEach( (x,index,dests)=>{
+        taskDestBaseNameSameAsSrc.forEach((x, index, dests) => {
           let destDir = path.dirname(x);
-          if (!pairsGroups.hasOwnProperty(destDir)){
+          if (!pairsGroups.hasOwnProperty(destDir)) {
             pairsGroups[destDir] = []
           }
           let originIndex = task.dest.indexOf(x);
           pairsGroups[destDir].push(task.src[originIndex])
         })
-        // debug(pairsGroups)
-        for(let k in pairsGroups){
+
+        for (let k in pairsGroups) {
           let
             pluginName = task.name.split(":")[0];
 
           if (pluginName in taskPrinters) {
-            let newTask = Object.assign({}, task, { src:pairsGroups[k], dest: k })
+            let newTask = Object.assign({}, task, { src: pairsGroups[k], dest: k })
             verbose('Found task in taskPrinters: ' + task.name);
             out("    gulp")
             taskPrinters[pluginName](newTask);
@@ -503,51 +473,45 @@ function gruntConverter(gruntModule) {
             src(pairsGroups[k])
             dest(path.dirname(k))
           }
+          out("    ,");
 
-          // if (index < dests.length - 1) {
-            out("    ,");
-          // } else {
-          //   out("  );");
-          // }
         }
         //src and dest pairs
-        let taskRests = task.dest.filter( x =>  {return -1==taskDestBaseNameSameAsSrc.indexOf(x)} );
+        let taskRests = task.dest.filter(x => { return -1 == taskDestBaseNameSameAsSrc.indexOf(x) });
 
-        taskRests.forEach( function(x,index,dests) {
-          
-          let 
+        taskRests.forEach(function (x, index, dests) {
+
+          let
             pluginName = task.name.split(":")[0];
 
           if (pluginName in taskPrinters) {
-            let originIndex = task.dest.indexOf(x);
-            let newTask = Object.assign({},task,{src:task.src[originIndex],dest:x})
+            let
+              originIndex = task.dest.indexOf(x),
+              newTask = Object.assign({}, task, { src: task.src[originIndex], dest: x });
+
             verbose('Found task in taskPrinters: ' + task.name);
             out("    gulp")
-            // src(task.src[index])
-            function afterProduced(x,index,task){
+
+            function afterProduced(x, index, task) {
               let ext = path.extname(x);
-              if(ext && path.basename(x)!=path.basename(task.src[index])){
-                pipe("rename('"+ path.basename(x) +"')")
+              if (ext && path.basename(x) != path.basename(task.src[index])) {
+                pipe("rename('" + path.basename(x) + "')")
               }
             }
-            taskPrinters[pluginName](newTask,afterProduced.bind(null,x,originIndex,task));
-          } else{
+            taskPrinters[pluginName](newTask, afterProduced.bind(null, x, originIndex, task));
+          } else {
             out("    gulp")
             src(task.src[index])
             dest(path.dirname(x))
           }
-          
-          if(index < dests.length -1){
+
+          if (index < dests.length - 1) {
             out("    ,");
-          }else{
-            // out("  );");
           }
-          
         });
+
         out("  );");
-        
-        
-      }else if ('dest' in task && task.dest !== undefined) {
+      } else if ('dest' in task && task.dest !== undefined) {
         out("  return gulp");
 
         let pluginName = task.name.split(":")[0]
@@ -556,8 +520,9 @@ function gruntConverter(gruntModule) {
           taskPrinters[pluginName](task);
 
         } else {
-          if ('src' in task)
+          if ('src' in task) {
             src(task.src)
+          }
 
           if ('dest' in task && task.dest !== undefined) {
             verbose('Printing task destination: ' + task.name);
@@ -567,15 +532,14 @@ function gruntConverter(gruntModule) {
               'undefined: ' + task.name + ', ' + task.dest);
           }
         }
-      }else {
+      } else {
         out("  return gulp");
         src(task.src)
         verbose('Task not found in taskPrinters or destination file is ' +
-        'undefined: ' + task.name + ', ' + task.dest);
+          'undefined: ' + task.name + ', ' + task.dest);
       }
-    out("});");  
-  }    
- 
+      out("});");
+    }
   }
 
   /**
@@ -616,20 +580,20 @@ function gruntConverter(gruntModule) {
    * @instance
    */
   this.print = function() {
-    var i;
     printRequire('gulp');
     var needRequiredModules = [];
-    for (let i = 0; i < requires.length; i += 1) {
-      let [needRequire,name]= printRequire(requires[i]);
+    for(let x of requires){
+      let [needRequire,name]= printRequire(x);
       needRequire && needRequiredModules.push(name)
     }
+    
     out(`// npm install ${needRequiredModules.join(" ")} --save-dev`)
     out();
     printExtroCode();
     out();
 
-    for (let i = 0; i < definitions.length; i += 1) {
-      printDefinition(definitions[i]);
+    for (let x of definitions) {
+      printDefinition(x);
     }
     out();
     let needMerge = tasks.find( task => {
@@ -641,13 +605,13 @@ function gruntConverter(gruntModule) {
       out();
     }
 
-    for (let i = 0; i < tasks.length; i += 1) {
-      if (tasks[i].name.startsWith('watch')) {
-        printWatchTask(tasks[i]);
-      } else if (tasks[i].name === 'karma') {
-        printKarmaTask(tasks[i]);
+    for (let x of tasks) {
+      if (x.name.startsWith('watch')) {
+        printWatchTask(x);
+      } else if (x.name === 'karma') {
+        printKarmaTask(x);
       } else {
-        printTask(tasks[i]);
+        printTask(x);
       }
       out();
     }
@@ -689,8 +653,7 @@ function gruntConverter(gruntModule) {
    * @instance
    */
   this.initConfig = function(config) {
-    var task;
-    for (task in config) {
+    for (let task in config) {
       if (config.hasOwnProperty(task)) {
         processGruntConfig(task, config[task]);
       }
@@ -775,13 +738,13 @@ function convertGruntFile(filename) {
   converter.print();
 }
 
-var i, gruntFiles = process.argv.slice(2);
+var gruntFiles = process.argv.slice(2);
 if (gruntFiles.length === 0) {
   usage();
 } else {
-  for (i = 0; i < gruntFiles.length; i += 1) {
+  for (let file of gruntFiles) {
     try {
-      var gruntFile = path.resolve(gruntFiles[i]);
+      var gruntFile = path.resolve(file);
       lintGruntFile(gruntFile);
       convertGruntFile(gruntFile);
     } catch (e) {
