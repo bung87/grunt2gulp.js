@@ -122,9 +122,7 @@ function gruntConverter(gruntModule) {
    * @inner
    * @default
    */
-  var gulpExcludedPackages = ['grunt-contrib-watch'];
-
-  var moduleNameInPrinters =["bowercopy"]
+  var gulpExcludedPackages = ['grunt-contrib-watch','grunt-bowercopy'];
 
   // output functions
   function src(srcs,option){
@@ -423,9 +421,6 @@ function gruntConverter(gruntModule) {
    * @inner
    */
   function printRequire(moduleName) {
-    if(moduleNameInPrinters.indexOf(moduleName)!==-1){
-      return;
-    }
     var name = moduleName;
     if (moduleName !== 'gulp') {
         name = 'gulp-' + moduleName;
@@ -436,6 +431,7 @@ function gruntConverter(gruntModule) {
       });
       
       out("var " + camelCase(moduleName) + " = require('" + name + "');");
+      return [true,name]
     }catch(e){
       debug(`'${name}' is not in the npm registry,will using grunt.loadNpmTasks('grunt-${moduleName}')`);
       if(!gruntRequired)
@@ -443,6 +439,7 @@ function gruntConverter(gruntModule) {
       gruntRequired = true;
       out("grunt.loadNpmTasks('grunt-" + moduleName + "');");
     }
+    return false
   }
 
   /**
@@ -621,10 +618,14 @@ function gruntConverter(gruntModule) {
   this.print = function() {
     var i;
     printRequire('gulp');
-    printExtroCode();
+    var needRequiredModules = [];
     for (let i = 0; i < requires.length; i += 1) {
-      printRequire(requires[i]);
+      let [needRequire,name]= printRequire(requires[i]);
+      needRequiredModules.push(name)
     }
+    out(`// npm install ${needRequiredModules.join(" ")} --save-dev`)
+    out();
+    printExtroCode();
     out();
 
     for (let i = 0; i < definitions.length; i += 1) {
@@ -708,7 +709,7 @@ function gruntConverter(gruntModule) {
    * @instance
    */
   this.loadNpmTasks = function(npmPackageName) {
-    if (gulpExcludedPackages.indexOf(npmPackageName) === 0) {
+    if (gulpExcludedPackages.indexOf(npmPackageName) !== -1) {
     } else if (npmPackageName.indexOf('grunt-contrib-') === 0) {
       requires.push(npmPackageName.slice('grunt-contrib-'.length));
     } else if (npmPackageName.indexOf('grunt-') === 0) {
