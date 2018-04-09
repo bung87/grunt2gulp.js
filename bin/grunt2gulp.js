@@ -124,6 +124,8 @@ function gruntConverter(gruntModule) {
    */
   var gulpExcludedPackages = ['grunt-contrib-watch'];
 
+  var moduleNameInPrinters =["bowercopy"]
+
   // output functions
   function src(srcs,option){
     if(is.array(srcs)){
@@ -227,10 +229,26 @@ function gruntConverter(gruntModule) {
     afterProduced && afterProduced()
     dest(path.dirname(task.dest))
   }
+  function prefixInBowerrc(){
+    return JSON.parse(fs.readFileSync(path.resolve(".bowerrc"), 'utf-8')).hasOwnProperty("directory")
+  }
 
   taskPrinters['bowercopy'] = function (task,afterProduced) {
-    // let option = getTaskOption(task);
-    src(task.src,{cwd:"bower_components",allowEmpty:true})
+    var srcPrefix ;
+    if( "options" in task && 'srcPrefix' in task.options ){
+      srcPrefix = task.options.srcPrefix 
+    }else if(fs.existsSync(path.resolve(".bowerrc"))){
+      let config = JSON.parse(fs.readFileSync(path.resolve(".bowerrc"), 'utf-8'))
+      
+      if(config.hasOwnProperty("directory")){
+        srcPrefix = config["directory"]
+      }else{
+        srcPrefix = "bower_components"
+      }
+    }else{
+      srcPrefix = "bower_components"
+    }
+    src(task.src,{cwd:srcPrefix,allowEmpty:true})
     afterProduced && afterProduced()
     dest(path.dirname(task.dest),{
       cwd:task.options.destPrefix
@@ -395,7 +413,7 @@ function gruntConverter(gruntModule) {
     var value = typeof definition.value === "string" ? definition.value.replace(/\n/g,"") : definition.value;
     out("var " + definition.name + " = " + value + ";");
   }
-
+  var converter = this;
   /**
    * Prints out a require statement for a gulp module. Prefixes the
    * module name with 'gulp'.
@@ -405,6 +423,9 @@ function gruntConverter(gruntModule) {
    * @inner
    */
   function printRequire(moduleName) {
+    if(moduleNameInPrinters.indexOf(moduleName)!==-1){
+      return;
+    }
     var name = moduleName;
     if (moduleName !== 'gulp') {
         name = 'gulp-' + moduleName;
