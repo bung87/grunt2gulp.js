@@ -467,7 +467,8 @@ function gruntConverter(gruntModule) {
           if (!pairsGroups.hasOwnProperty(destDir)){
             pairsGroups[destDir] = []
           }
-          pairsGroups[destDir].push(task.src[index])
+          let originIndex = task.dest.indexOf(x);
+          pairsGroups[destDir].push(task.src[originIndex])
         })
         // debug(pairsGroups)
         for(let k in pairsGroups){
@@ -492,23 +493,26 @@ function gruntConverter(gruntModule) {
           // }
         }
         //src and dest pairs
-        task.dest.filter( x =>  {return -1==taskDestBaseNameSameAsSrc.indexOf(x)} ).forEach( function(x,index,dests) {
+        let taskRests = task.dest.filter( x =>  {return -1==taskDestBaseNameSameAsSrc.indexOf(x)} );
+
+        taskRests.forEach( function(x,index,dests) {
           
           let 
             pluginName = task.name.split(":")[0];
 
           if (pluginName in taskPrinters) {
-            let newTask = Object.assign({},task,{src:task.src[index],dest:x})
+            let originIndex = task.dest.indexOf(x);
+            let newTask = Object.assign({},task,{src:task.src[originIndex],dest:x})
             verbose('Found task in taskPrinters: ' + task.name);
             out("    gulp")
             // src(task.src[index])
-            function afterProduced(){
+            function afterProduced(x,index,task){
               let ext = path.extname(x);
               if(ext && path.basename(x)!=path.basename(task.src[index])){
                 pipe("rename('"+ path.basename(x) +"')")
               }
             }
-            taskPrinters[pluginName](newTask,afterProduced);
+            taskPrinters[pluginName](newTask,afterProduced.bind(null,x,originIndex,task));
           } else{
             out("    gulp")
             src(task.src[index])
