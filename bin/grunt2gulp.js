@@ -76,7 +76,7 @@ function gruntConverter(gruntModule) {
 
   function printExtroCode(){
     let lines = gruntModule.toString().split('\n');
-    let end = lines.find( line => {
+    let end = lines.findIndex( line => {
       return /grunt\.initConfig\(/g.test(line)
     } )
     let gruntNeed =  lines.find( line =>{
@@ -185,7 +185,7 @@ function gruntConverter(gruntModule) {
     let option = getTaskOption(task);
     src(task.src)
     // pipe("concat('all.js')");
-    pipe(`concat(${option})`);
+    pipe(`concat('${path.basename(task.dest)}',${option})`);
     afterProduced && afterProduced()
     dest(path.dirname(task.dest))
   }
@@ -230,7 +230,7 @@ function gruntConverter(gruntModule) {
 
   taskPrinters['bowercopy'] = function (task,afterProduced) {
     // let option = getTaskOption(task);
-    src(task.src,{base:"bower_components"})
+    src(task.src,{cwd:"bower_components",allowEmpty:true})
     afterProduced && afterProduced()
     dest(path.dirname(task.dest),{
       cwd:task.options.destPrefix
@@ -304,21 +304,23 @@ function gruntConverter(gruntModule) {
    * @inner
    */
   function processGruntConfig(taskName, options) {
-    var key, option, src = [], dest = [];
+    var key, option
     function processFileList(fileList) {
-      for (let i = 0; i < fileList.length; i += 1) {
-        if(typeof fileList[i] == 'object' ){
-          src = src.concat(fileList[i].src);
-          dest.push(fileList[i].dest);
-        }else{
-          src = src.concat(fileList[i]);
-          // dest.push(fileList[i]);
+      let src = [], dest = [];
+      fileList.forEach( v => {
+        if (is.object(v)) {
+          src = src.concat(v.src);
+          dest.push(v.dest);
+        } else {
+          src = src.concat(v);
+          dest.push(v);
         }
-       
-      }
+      })
+      return [src,dest]
     }
     if (typeof options === 'object') {
       for (option in options) {
+        let src = [], dest = [];
 
         if (option === 'options' || taskName == 'pkg') {
           continue;
@@ -338,7 +340,9 @@ function gruntConverter(gruntModule) {
             if (typeof options[option].files === 'string') {
               src = src.push(options[option].files);
             } else if (Array.isArray(options[option].files)){
-              processFileList(options[option].files);
+              let [src1,dest1] = processFileList(options[option].files);
+              src = src.concat(src1)
+              dest = dest.concat(dest1)
             } else {
               for (key in options[option].files) {
                  let fileList = options[option].files[key];
@@ -349,7 +353,9 @@ function gruntConverter(gruntModule) {
                     dest.push(fileList[i]);
                   }
                 } else if(typeof fileList === 'object') {
-                  processFileList(fileList);
+                  let [src1,dest1] = processFileList(fileList);
+                  src = src.concat(src1)
+                  dest = dest.concat(dest1)
                 } else {
                   src.push(fileList);
                   dest.push(key);
@@ -450,8 +456,43 @@ function gruntConverter(gruntModule) {
     
       if('dest' in task && is.array(task.dest) ){
         out("  return merge(");
+        //task no needs rename
+        let taskDestBaseNameSameAsSrc = task.dest.filter( (x,index) =>{
+          // let ext = path.extname(x);
+          return path.basename(x) == path.basename(task.src[index])
+        }) 
+        let pairsGroups = {}
+        taskDestBaseNameSameAsSrc.forEach( (x,index,dests)=>{
+          let destDir = path.dirname(x);
+          if (!pairsGroups.hasOwnProperty(destDir)){
+            pairsGroups[destDir] = []
+          }
+          pairsGroups[destDir].push(task.src[index])
+        })
+        // debug(pairsGroups)
+        for(let k in pairsGroups){
+          let
+            pluginName = task.name.split(":")[0];
+
+          if (pluginName in taskPrinters) {
+            let newTask = Object.assign({}, task, { src:pairsGroups[k], dest: k })
+            verbose('Found task in taskPrinters: ' + task.name);
+            out("    gulp")
+            taskPrinters[pluginName](newTask);
+          } else {
+            out("    gulp")
+            src(pairsGroups[k])
+            dest(path.dirname(k))
+          }
+
+          // if (index < dests.length - 1) {
+            out("    ,");
+          // } else {
+          //   out("  );");
+          // }
+        }
         //src and dest pairs
-        task.dest.forEach( function(x,index,dests) {
+        task.dest.filter( x =>  {return -1==taskDestBaseNameSameAsSrc.indexOf(x)} ).forEach( function(x,index,dests) {
           
           let 
             pluginName = task.name.split(":")[0];
@@ -477,10 +518,11 @@ function gruntConverter(gruntModule) {
           if(index < dests.length -1){
             out("    ,");
           }else{
-            out("  );");
+            // out("  );");
           }
           
         });
+        out("  );");
         
         
       }else if ('dest' in task && task.dest !== undefined) {
@@ -504,6 +546,7 @@ function gruntConverter(gruntModule) {
           }
         }
       }else {
+        out("  return gulp");
         src(task.src)
         verbose('Task not found in taskPrinters or destination file is ' +
         'undefined: ' + task.name + ', ' + task.dest);
