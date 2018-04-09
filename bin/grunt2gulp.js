@@ -148,7 +148,8 @@ function gruntConverter(gruntModule) {
    * @inner
    */
   function dest(str,option) {
-    pipe(`gulp.dest('${str}'${option ? ","+JSON.stringify(option):""})`);
+    let destDir = path.extname(str) ? path.dirname(str) : str;
+    pipe(`gulp.dest('${destDir}'${option ? ","+JSON.stringify(option):""})`);
   }
 
   // task-specific printers
@@ -177,7 +178,7 @@ function gruntConverter(gruntModule) {
     src(task.src)
     pipe(`uglify(${option})`);
     afterProduced && afterProduced()
-    dest(path.dirname(task.dest))
+    dest(task.dest)
     // pipe("rename({suffix: '.min'})")
   }
 
@@ -187,7 +188,7 @@ function gruntConverter(gruntModule) {
     // pipe("concat('all.js')");
     pipe(`concat('${path.basename(task.dest)}',${option})`);
     afterProduced && afterProduced()
-    dest(path.dirname(task.dest))
+    dest(task.dest)
   }
 
   taskPrinters['replace'] = function replace(task,afterProduced) {
@@ -197,14 +198,14 @@ function gruntConverter(gruntModule) {
       pipe(`replace(${pattern},${replacement})`);
     })
     afterProduced && afterProduced()
-    dest(path.dirname(task.dest))
+    dest(task.dest)
   }
   
   taskPrinters['wiredep'] = function wiredep(task,afterProduced) {
     src(task.src)
     pipe('wiredep()');
     afterProduced && afterProduced()
-    dest(path.dirname(task.dest))
+    dest(task.dest)
   }
   
   taskPrinters['filerev'] = function filerev(task,afterProduced) {
@@ -216,7 +217,7 @@ function gruntConverter(gruntModule) {
     src(task.src)
     pipe(`less(${option})`);
     afterProduced && afterProduced()
-    dest(path.dirname(task.dest))
+    dest(task.dest)
   }
 
   taskPrinters['cssmin'] = function (task,afterProduced) {
@@ -225,7 +226,7 @@ function gruntConverter(gruntModule) {
     pipe(`cssmin(${option})`);
     pipe("rename({suffix: '.min'})")
     afterProduced && afterProduced()
-    dest(path.dirname(task.dest))
+    dest(task.dest)
   }
   function prefixInBowerrc(){
     return JSON.parse(fs.readFileSync(path.resolve(".bowerrc"), 'utf-8')).hasOwnProperty("directory")
@@ -248,7 +249,7 @@ function gruntConverter(gruntModule) {
     }
     src(task.src,{cwd:srcPrefix,allowEmpty:true})
     afterProduced && afterProduced()
-    dest(path.dirname(task.dest),{
+    dest(task.dest,{
       cwd:task.options.destPrefix
     })
   }
@@ -382,7 +383,7 @@ function gruntConverter(gruntModule) {
     var value = typeof definition.value === "string" ? definition.value.replace(/\n/g,"\\n") : definition.value;
     out("var " + definition.name + " = " + value + ";");
   }
-  var converter = this;
+
   /**
    * Prints out a require statement for a gulp module. Prefixes the
    * module name with 'gulp'.
@@ -451,7 +452,7 @@ function gruntConverter(gruntModule) {
         })
         let pairsGroups = {}
         taskDestBaseNameSameAsSrc.forEach((x, index, dests) => {
-          let destDir = path.dirname(x);
+          let destDir = path.extname(x) ? path.dirname(x) : x;
           if (!pairsGroups.hasOwnProperty(destDir)) {
             pairsGroups[destDir] = []
           }
@@ -471,7 +472,7 @@ function gruntConverter(gruntModule) {
           } else {
             out("    gulp")
             src(pairsGroups[k])
-            dest(path.dirname(k))
+            dest(k)
           }
           out("    ,");
 
@@ -502,7 +503,7 @@ function gruntConverter(gruntModule) {
           } else {
             out("    gulp")
             src(task.src[index])
-            dest(path.dirname(x))
+            dest(x)
           }
 
           if (index < dests.length - 1) {
