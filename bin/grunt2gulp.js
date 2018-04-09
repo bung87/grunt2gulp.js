@@ -125,6 +125,14 @@ function gruntConverter(gruntModule) {
   var gulpExcludedPackages = ['grunt-contrib-watch'];
 
   // output functions
+  function src(srcs,option){
+    if(is.array(srcs)){
+      out(`    .src( ${JSON.stringify( srcs )} ${option ? ","+JSON.stringify(option):""})`);
+    }else{
+      out(`    .src('${srcs}'${option ? ","+JSON.stringify(option):""})`);
+    }
+    
+  }
   /**
    * Prints out the pipe command for a Gulp file
    * @param {String} str The argument to the pipe command.
@@ -139,8 +147,8 @@ function gruntConverter(gruntModule) {
    * @param {String} str The argument to the gulp.dest command.
    * @inner
    */
-  function dest(str) {
-    pipe("gulp.dest('" + str + "')");
+  function dest(str,option) {
+    pipe(`gulp.dest('${str}'${option ? ","+JSON.stringify(option):""})`);
   }
 
   // task-specific printers
@@ -164,49 +172,69 @@ function gruntConverter(gruntModule) {
     pipe("jshint.reporter('default')");
   }
 
-  taskPrinters['uglify'] = function uglify(task) {
+  taskPrinters['uglify'] = function uglify(task,afterProduced) {
     let option = getTaskOption(task);
+    src(task.src)
     pipe(`uglify(${option})`);
+    afterProduced && afterProduced()
+    dest(path.dirname(task.dest))
     // pipe("rename({suffix: '.min'})")
-    // dest(task.dest);
   }
 
-  taskPrinters['concat'] = function concat(task) {
+  taskPrinters['concat'] = function concat(task,afterProduced) {
     let option = getTaskOption(task);
+    src(task.src)
     // pipe("concat('all.js')");
     pipe(`concat(${option})`);
-    // dest(task.dest);
+    afterProduced && afterProduced()
+    dest(path.dirname(task.dest))
   }
 
-  taskPrinters['replace'] = function replace(task) {
+  taskPrinters['replace'] = function replace(task,afterProduced) {
+    src(task.src)
     task.options.patterns.forEach( p => {
       let pattern = p.match,replacement = p.replacement
       pipe(`replace(${pattern},${replacement})`);
     })
-    
-    // dest(task.dest);
+    afterProduced && afterProduced()
+    dest(path.dirname(task.dest))
   }
   
-  taskPrinters['wiredep'] = function wiredep(task) {
+  taskPrinters['wiredep'] = function wiredep(task,afterProduced) {
+    src(task.src)
     pipe('wiredep()');
-    // dest(task.dest);
+    afterProduced && afterProduced()
+    dest(path.dirname(task.dest))
   }
   
-  taskPrinters['filerev'] = function filerev(task) {
+  taskPrinters['filerev'] = function filerev(task,afterProduced) {
     // TODO: #15 custom filerev taskPrinter
   }
 
-  taskPrinters['less'] = function (task) {
+  taskPrinters['less'] = function (task,afterProduced) {
     let option = getTaskOption(task);
+    src(task.src)
     pipe(`less(${option})`);
-    // dest(task.dest);
+    afterProduced && afterProduced()
+    dest(path.dirname(task.dest))
   }
 
-  taskPrinters['cssmin'] = function (task) {
+  taskPrinters['cssmin'] = function (task,afterProduced) {
     let option = getTaskOption(task);
+    src(task.src)
     pipe(`cssmin(${option})`);
     pipe("rename({suffix: '.min'})")
-    // dest(task.dest);
+    afterProduced && afterProduced()
+    dest(path.dirname(task.dest))
+  }
+
+  taskPrinters['bowercopy'] = function (task,afterProduced) {
+    // let option = getTaskOption(task);
+    src(task.src,{base:"bower_components"})
+    afterProduced && afterProduced()
+    dest(path.dirname(task.dest),{
+      cwd:task.options.destPrefix
+    })
   }
 
    
@@ -420,29 +448,30 @@ function gruntConverter(gruntModule) {
     } else {
       out("gulp.task('" + task.name + "', function () {" + duplicate);
     
-      if(task.dest !== undefined && is.array(task.dest) ){
+      if('dest' in task && is.array(task.dest) ){
         out("  return merge(");
-        task.dest.forEach( function(dest,index,dests) {
-          out("    gulp.src('" + task.src[index] + "')");
-          let pluginName = task.name.split(":")[0]
+        //src and dest pairs
+        task.dest.forEach( function(x,index,dests) {
+          
+          let 
+            pluginName = task.name.split(":")[0];
+
           if (pluginName in taskPrinters) {
+            let newTask = Object.assign({},task,{src:task.src[index],dest:x})
             verbose('Found task in taskPrinters: ' + task.name);
-            taskPrinters[pluginName](task);
-            let ext = path.extname(dests[index]);
-            if(ext && path.basename(dests[index])!=path.basename(task.src[index])){
-              pipe("rename('"+ path.basename(dests[index]) +"')")
+            out("    gulp")
+            // src(task.src[index])
+            function afterProduced(){
+              let ext = path.extname(x);
+              if(ext && path.basename(x)!=path.basename(task.src[index])){
+                pipe("rename('"+ path.basename(x) +"')")
+              }
             }
-            out("    .pipe(gulp.dest('" + path.dirname(dests[index]) + "'))");
-          } else if ('dest' in task && task.dest !== undefined) {
-            verbose('Printing task destination: ' + task.name);
-            let ext = path.extname(dests[index]);
-            if(ext && path.basename(dests[index])!=path.basename(task.src[index])){
-              pipe("rename('"+ path.basename(dests[index]) +"')")
-            }
-            out("    .pipe(gulp.dest('" + path.dirname(dests[index]) + "'))");
-          } else {
-            verbose('Task not found in taskPrinters or destination file is ' +
-              'undefined: ' + task.name + ', ' + task.dest);
+            taskPrinters[pluginName](newTask,afterProduced);
+          } else{
+            out("    gulp")
+            src(task.src[index])
+            dest(path.dirname(x))
           }
           
           if(index < dests.length -1){
@@ -453,29 +482,35 @@ function gruntConverter(gruntModule) {
           
         });
         
-        out("});");
-      }else{
+        
+      }else if ('dest' in task && task.dest !== undefined) {
         out("  return gulp");
-        if(task.src)
-        out("    .src(" + JSON.stringify( task.src ) + ")");
+
         let pluginName = task.name.split(":")[0]
         if (pluginName in taskPrinters) {
           verbose('Found task in taskPrinters: ' + task.name);
           taskPrinters[pluginName](task);
-          out("    .pipe(gulp.dest('" + path.dirname(task.dest) + "'))");
-        } else if ('dest' in task && task.dest !== undefined) {
-          verbose('Printing task destination: ' + task.name);
-          out("    .pipe(gulp.dest('" + task.dest + "'))");
+
         } else {
-          verbose('Task not found in taskPrinters or destination file is ' +
-            'undefined: ' + task.name + ', ' + task.dest);
+          if ('src' in task)
+            src(task.src)
+
+          if ('dest' in task && task.dest !== undefined) {
+            verbose('Printing task destination: ' + task.name);
+            dest(task.dest)
+          } else {
+            verbose('Task not found in taskPrinters or destination file is ' +
+              'undefined: ' + task.name + ', ' + task.dest);
+          }
         }
-        out("  ;");
-        out("});");
+      }else {
+        src(task.src)
+        verbose('Task not found in taskPrinters or destination file is ' +
+        'undefined: ' + task.name + ', ' + task.dest);
       }
-      
+    out("});");  
   }    
-    
+ 
   }
 
   /**
