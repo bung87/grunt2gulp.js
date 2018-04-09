@@ -408,7 +408,7 @@ function gruntConverter(gruntModule) {
    */
   function printDefinition(definition) {
 
-    var value = typeof definition.value === "string" ? definition.value.replace(/\n/g,"") : definition.value;
+    var value = typeof definition.value === "string" ? definition.value.replace(/\n/g,"\\n") : definition.value;
     out("var " + definition.name + " = " + value + ";");
   }
   var converter = this;
@@ -621,7 +621,7 @@ function gruntConverter(gruntModule) {
     var needRequiredModules = [];
     for (let i = 0; i < requires.length; i += 1) {
       let [needRequire,name]= printRequire(requires[i]);
-      needRequiredModules.push(name)
+      needRequire && needRequiredModules.push(name)
     }
     out(`// npm install ${needRequiredModules.join(" ")} --save-dev`)
     out();
