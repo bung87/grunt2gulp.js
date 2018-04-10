@@ -7,6 +7,7 @@
 
 var fs = require('fs');
 var path = require('path');
+var grunt = require('grunt');
 const { execSync } = require('child_process');
 const is = require('is_js');
 
@@ -308,7 +309,7 @@ function gruntConverter(gruntModule) {
    * @see [processGruntTask]{@link module:grunt2gulp~gruntConverter~processGruntTask}
    * @inner
    */
-  function processGruntConfig(taskName, options) {
+  function processGruntConfig(taskName, options,config) {
   
     if (is.object(options)) {
       for (let option in options) {
@@ -330,7 +331,7 @@ function gruntConverter(gruntModule) {
             dest.push(options[option].dest);
           } else if ('files' in options[option]) {
             if (typeof options[option].files === 'string') {
-              src = src.push(options[option].files);
+              src.push(options[option].files);
             } else if (is.array(options[option].files)){
               let [src1,dest1] = processFileList(options[option].files);
               src = src.concat(src1)
@@ -359,8 +360,9 @@ function gruntConverter(gruntModule) {
           let
             taskOptions = 'options' in options[option] && is.object(options[option]['options']) ? options[option]['options'] : {},
             taskTasks = 'tasks' in options[option] && is.array(options[option]['tasks']) ? options[option]['tasks'] : [];
-
-          processGruntTask(taskName + ":" + option, src, dest, taskOptions, taskTasks);
+          processGruntTask(taskName + ":" + option, src.filter(x => !is.undefined(x)).map(x => {
+            return grunt.template.process(x, { data: config })
+          }), dest, taskOptions, taskTasks);
         }
       }
     } else if (typeof options === 'string') {
@@ -435,13 +437,20 @@ function gruntConverter(gruntModule) {
    * @inner
    */
   function printTask(task) {
-    var duplicate = '';
+    var duplicate = '',taskCallBack='';
     if ('_isDuplicate' in task && task._isDuplicate) {
       duplicate = ' // WARNING: potential duplicate task';
     }
+    if ('body' in task){
+      taskCallBack = `,${task.body}`
+    }
     if ('dependencies' in task) {
-      out("gulp.task('" + task.name + "', gulp.series(" + JSON.stringify(task.dependencies) + "));");
+      out(`gulp.task('${task.name}', gulp.series(${JSON.stringify(task.dependencies)})${taskCallBack});`);
     } else {
+      if ('body' in task){
+        out(`gulp.task('${task.name}'${taskCallBack}`);
+        return;
+      }
       out("gulp.task('" + task.name + "', function () {" + duplicate);
 
       if ('dest' in task && is.array(task.dest)) {
@@ -631,10 +640,22 @@ function gruntConverter(gruntModule) {
      * Does nothing.
      */
     readJSON: function(filePath) {
-      return JSON.parse(fs.readFileSync(path.resolve(filePath), 'utf-8'));
+      let thePath = path.resolve(filePath);
+      if(fs.existsSync(thePath)){
+        return JSON.parse(fs.readFileSync(thePath, 'utf-8'));
+      }else{
+        return {}
+      }
+      
     },
     read: function(filePath){
-      return fs.readFileSync(path.resolve(filePath), 'utf-8');
+      let thePath = path.resolve(filePath);
+      if(fs.existsSync(thePath)){
+        return fs.readFileSync(thePath, 'utf-8');
+      }else{
+        return {}
+      }
+      
     }
   }
 
@@ -656,7 +677,7 @@ function gruntConverter(gruntModule) {
   this.initConfig = function(config) {
     for (let task in config) {
       if (config.hasOwnProperty(task)) {
-        processGruntConfig(task, config[task]);
+        processGruntConfig(task, config[task],config);
       }
     }
   }
@@ -693,11 +714,19 @@ function gruntConverter(gruntModule) {
    * @memberof module:grunt2gulp~gruntConverter
    * @instance
    */
-  this.registerTask = function(name, dependencies, body) {
+  this.registerTask = function(name,...args) {
     var task = Object.create(null);
     task.name = name;
-    task.dependencies = dependencies;
-    task.body = body;
+    for (let arg of args){
+      if(is.array(arg)){
+        task.dependencies = arg;
+      }else if(is.function(arg)){
+        task.body = arg;
+      }else if(is.string(arg)){
+        task.description = arg;
+      }
+    }
+    
     tasks.push(task);
   }
 
