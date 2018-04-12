@@ -396,12 +396,18 @@ function gruntConverter(gruntModule) {
    */
   function printDefinition(definition) {
     var value
-    if(is.string(definition.value)){
-      value = "`" + definition.value.replace(/\n/g,"\\n").replace(/<%=/g,"${").replace(/%>/g,'}') +  "`";
-    }else {
-      value = JSON.stringify(definition.value)
+    if(definition.isRaw){
+      value = definition.isRaw
+    }else{
+      if(is.string(definition.value)){
+        value = "`" + definition.value.replace(/\n/g,"\\n").replace(/<%=/g,"${").replace(/%>/g,'}') +  "`";
+      }else {
+        value = JSON.stringify(definition.value)
+      }
+      
     }
     out("var " + definition.name + " = " + value + ";");
+    
   }
 
   /**
@@ -614,15 +620,23 @@ function gruntConverter(gruntModule) {
       let [needRequire,name]= printRequire(x);
       needRequire && needRequiredModules.push(name)
     }
-    // debug(pluginNames,333)
+    let gruntModuleStr = gruntModule.toString();
     for (let k in this.gruntConfig){
       if(!pluginNames.has(k)){
+        let 
+          reg = new RegExp(`["']*${k}["']*\\s*:\\s*([^\\)\\n]+\\))`),
+          matchs = reg.exec(gruntModuleStr)
+        // if(matchs!==null){
+        //   debug(matchs[1])
+        // }
         definitions.push({
           name:k,
-          value:this.gruntConfig[k]
+          value:this.gruntConfig[k],
+          isRaw:matchs!==null ? matchs[1] : false
         })
       }
     }
+    // out("var " + definition.name + " = " + value + ";");
     out(`// npm install ${needRequiredModules.join(" ")} --save-dev`)
     out();
     printExtroCode();
@@ -661,29 +675,7 @@ function gruntConverter(gruntModule) {
    * @member {Object} file
    * @instance
    */
-  this.file = {
-    /**
-     * Does nothing.
-     */
-    readJSON: function(filePath) {
-      let thePath = path.resolve(filePath);
-      if(fs.existsSync(thePath)){
-        return JSON.parse(fs.readFileSync(thePath, 'utf-8'));
-      }else{
-        return {}
-      }
-      
-    },
-    read: function(filePath){
-      let thePath = path.resolve(filePath);
-      if(fs.existsSync(thePath)){
-        return fs.readFileSync(thePath, 'utf-8');
-      }else{
-        return {}
-      }
-      
-    }
-  }
+  this.file = grunt.file //wasting time while process config but required as a grunt convert.
 
   /**
    * Log object.
