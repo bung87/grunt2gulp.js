@@ -10,6 +10,7 @@ var path = require('path');
 var grunt = require('grunt');
 const { execSync } = require('child_process');
 const is = require('is_js');
+const objectRenameKeys = require('object-rename-keys');
 
 /**
  * Whether or not debug mode is on
@@ -104,6 +105,8 @@ function gruntConverter(gruntModule) {
    */
   var taskNames = [];
 
+  var pluginNames = new Set();
+
   /**
    * The list of Gulp variable definitions
    * @inner
@@ -116,7 +119,7 @@ function gruntConverter(gruntModule) {
    * @inner
    * @default
    */
-  var requires = ['rename'];
+  var requires = new Set(['rename']);
 
   /**
    * The list of modules that Gulp does not need to load
@@ -164,9 +167,9 @@ function gruntConverter(gruntModule) {
    */
   var taskPrinters = Object.create(null);
 
-  function getTaskOption(task){
-    let option = is.empty(task.options ) ? "" : JSON.stringify(task.options)
-    return option;
+  function getTaskOption(options){
+    let option = is.empty(options ) ? "" : JSON.stringify(options)
+    return option.replace(/"<%=/g,"").replace(/%>"/g,'')
   }
 
   taskPrinters['jshint'] = function jshint() {
@@ -175,7 +178,18 @@ function gruntConverter(gruntModule) {
   }
 
   taskPrinters['uglify'] = function uglify(task,afterProduced) {
-    let option = getTaskOption(task);
+    let remapOptions = objectRenameKeys(task.options,{
+      'beautify':'output',
+      // 'banner':"output.preamble",
+      'mangle':{
+        'except':'reserved'
+      }
+    })
+    if('banner' in remapOptions){
+      delete remapOptions['banner'];
+      remapOptions["output"]['preamble'] = task.options['banner']
+    }
+    let option = getTaskOption(remapOptions);
     src(task.src)
     pipe(`uglify(${option})`);
     afterProduced && afterProduced()
@@ -184,7 +198,7 @@ function gruntConverter(gruntModule) {
   }
 
   taskPrinters['concat'] = function concat(task,afterProduced) {
-    let option = getTaskOption(task);
+    let option = getTaskOption(task.options);
     src(task.src)
     // pipe("concat('all.js')");
     pipe(`concat('${path.basename(task.dest)}',${option})`);
@@ -214,7 +228,7 @@ function gruntConverter(gruntModule) {
   }
 
   taskPrinters['less'] = function (task,afterProduced) {
-    let option = getTaskOption(task);
+    let option = getTaskOption(task.options);
     src(task.src)
     pipe(`less(${option})`);
     afterProduced && afterProduced()
@@ -222,7 +236,7 @@ function gruntConverter(gruntModule) {
   }
 
   taskPrinters['cssmin'] = function (task,afterProduced) {
-    let option = getTaskOption(task);
+    let option = getTaskOption(task.options);
     src(task.src)
     pipe(`cssmin(${option})`);
     pipe("rename({suffix: '.min'})")
@@ -301,46 +315,46 @@ function gruntConverter(gruntModule) {
   /**
    * Processes the grunt configuration for a task with options.
    *
-   * @param {String} taskName The name of the grunt task
-   * @param {(Object|String)} options The configuration options for
+   * @param {String} pluginName The name of the grunt task
+   * @param {(Object|String)} pluginConfig The configuration options for
    * the grunt task. When passed as an object, can handle the src and
    * dest configuration options. When passed as a string, assumes that
    * it is a destination path.
    * @see [processGruntTask]{@link module:grunt2gulp~gruntConverter~processGruntTask}
    * @inner
    */
-  function processGruntConfig(taskName, options,config) {
-  
-    if (is.object(options)) {
-      for (let option in options) {
+  function processGruntConfig(pluginName, pluginConfig,gruntConfig) {
+
+    if (is.object(pluginConfig)) {
+      for (let taskName in pluginConfig) {
         let src = [], dest = [];
 
-        if (option === 'options' || taskName == 'pkg') {
+        if (taskName === 'options' ) {
           continue;
         } else {
 
-          if (typeof(options[option]) === 'string') {
+          if (typeof(pluginConfig[taskName]) === 'string') {
             // @todo handle this case
-            out('// TODO: ' + option + ', ' + options[option]);
-          } else if ('src' in options[option]) {
-            if (typeof options[option].src === 'string') {
-              src.push(options[option].src);
+            out('// TODO: ' + taskName + ', ' + pluginConfig[taskName]);
+          } else if ('src' in pluginConfig[taskName]) {
+            if (typeof pluginConfig[taskName].src === 'string') {
+              src.push(pluginConfig[taskName].src);
             } else {
-              src = src.concat(options[option].src);
+              src = src.concat(pluginConfig[taskName].src);
             }
-            dest.push(options[option].dest);
-          } else if ('files' in options[option]) {
-            if (typeof options[option].files === 'string') {
-              src.push(options[option].files);
-            } else if (is.array(options[option].files)){
-              let [src1,dest1] = processFileList(options[option].files);
+            dest.push(pluginConfig[taskName].dest);
+          } else if ('files' in pluginConfig[taskName]) {
+            if (typeof pluginConfig[taskName].files === 'string') {
+              src.push(pluginConfig[taskName].files);
+            } else if (is.array(pluginConfig[taskName].files)){
+              let [src1,dest1] = processFileList(pluginConfig[taskName].files);
               src = src.concat(src1)
               dest = dest.concat(dest1)
-            } else if(is.object(options[option].files)){
-              for (let key in options[option].files) {
-                 let fileList = options[option].files[key];
+            } else if(is.object(pluginConfig[taskName].files)){
+              for (let key in pluginConfig[taskName].files) {
+                 let fileList = pluginConfig[taskName].files[key];
                 if (is.array(fileList)){
-                  let fileList = options[option].files[key];
+                  let fileList = pluginConfig[taskName].files[key];
                   for (let i = 0; i < fileList.length; i += 1) {
                     src.push(fileList[i]);
                     dest.push(fileList[i]);
@@ -354,21 +368,21 @@ function gruntConverter(gruntModule) {
           } else {
             // option is the destination path
             // options[option] is the list of source files
-            src = src.concat(options[option].src);
-            dest.push(option);
+            src = src.concat(pluginConfig[taskName].src);
+            dest.push(taskName);
           }
           let
-            taskOptions = 'options' in options[option] && is.object(options[option]['options']) ? options[option]['options'] : {},
-            taskTasks = 'tasks' in options[option] && is.array(options[option]['tasks']) ? options[option]['tasks'] : [];
-          processGruntTask(taskName + ":" + option, src.filter(x => !is.undefined(x)).map(x => {
-            return grunt.template.process(x, { data: config })
-          }), dest, taskOptions, taskTasks);
+            taskOptions = 'options' in pluginConfig[taskName] && is.object(pluginConfig[taskName]['options']) ? pluginConfig[taskName]['options'] : {},
+            taskTasks = 'tasks' in pluginConfig[taskName] && is.array(pluginConfig[taskName]['tasks']) ? pluginConfig[taskName]['tasks'] : [],
+            templat_proccessed_src = src.filter(x => !is.undefined(x)).map(x => {
+              return grunt.template.process(x, { data: gruntConfig })
+            }),
+            pluginOptionsMerged = is.object(pluginConfig["options"]) ? Object.assign(pluginConfig["options"],taskOptions) : taskOptions;
+          processGruntTask(pluginName + ":" + taskName,templat_proccessed_src , dest, pluginOptionsMerged, taskTasks);
         }
       }
-    } else if (typeof options === 'string') {
-      // the task name is a variable definition
-      definitions.push({ name: taskName, value: "'" + options + "'" });
-    }
+    } 
+    
   }
 
   /**
@@ -381,8 +395,12 @@ function gruntConverter(gruntModule) {
    * @inner
    */
   function printDefinition(definition) {
-
-    var value = typeof definition.value === "string" ? definition.value.replace(/\n/g,"\\n") : definition.value;
+    var value
+    if(is.string(definition.value)){
+      value = "`" + definition.value.replace(/\n/g,"\\n").replace(/<%=/g,"${").replace(/%>/g,'}') +  "`";
+    }else {
+      value = JSON.stringify(definition.value)
+    }
     out("var " + definition.name + " = " + value + ";");
   }
 
@@ -596,7 +614,15 @@ function gruntConverter(gruntModule) {
       let [needRequire,name]= printRequire(x);
       needRequire && needRequiredModules.push(name)
     }
-    
+    // debug(pluginNames,333)
+    for (let k in this.gruntConfig){
+      if(!pluginNames.has(k)){
+        definitions.push({
+          name:k,
+          value:this.gruntConfig[k]
+        })
+      }
+    }
     out(`// npm install ${needRequiredModules.join(" ")} --save-dev`)
     out();
     printExtroCode();
@@ -675,8 +701,9 @@ function gruntConverter(gruntModule) {
    * @instance
    */
   this.initConfig = function(config) {
+    this.gruntConfig = config;
     for (let task in config) {
-      if (config.hasOwnProperty(task)) {
+      if (config.hasOwnProperty(task) &&  pluginNames.has(task)) {
         processGruntConfig(task, config[task],config);
       }
     }
@@ -694,13 +721,18 @@ function gruntConverter(gruntModule) {
    * @instance
    */
   this.loadNpmTasks = function(npmPackageName) {
-    if (gulpExcludedPackages.indexOf(npmPackageName) !== -1) {
-    } else if (npmPackageName.indexOf('grunt-contrib-') === 0) {
-      requires.push(npmPackageName.slice('grunt-contrib-'.length));
+    let name ;
+    if (npmPackageName.indexOf('grunt-contrib-') === 0) {
+      name = npmPackageName.slice('grunt-contrib-'.length)
+      gulpExcludedPackages.indexOf(npmPackageName) == -1 && requires.add(name);
     } else if (npmPackageName.indexOf('grunt-') === 0) {
-      requires.push(npmPackageName.slice('grunt-'.length));
+      name = npmPackageName.slice('grunt-'.length)
+      gulpExcludedPackages.indexOf(npmPackageName) == -1 && requires.add(name);
     } else {
-      requires.push(npmPackageName);
+      gulpExcludedPackages.indexOf(npmPackageName) == -1 && requires.add(npmPackageName);
+    }
+    if(!is.undefined(name)){
+      pluginNames.add(name)
     }
   }
 
@@ -763,7 +795,13 @@ function lintGruntFile(gruntFilename) {
  * @param {String} filename The Gruntfile to load
  */
 function convertGruntFile(filename) {
-  var module = require(filename), converter = new gruntConverter(module);
+  var module = require(filename);
+  var module_str = module.toString();
+  var reg = /grunt\.loadNpmTasks\(['"]([^'"]+)['"]\)/mg
+  var tasks = module_str.match(reg).map( x => x.replace(reg,"$1"))
+  
+  let converter = new gruntConverter(module);
+  tasks.forEach( x=> converter.loadNpmTasks(x)) //preload for detecting whether configs is a plugin configs or a template variable
   module(converter);
   converter.print();
 }
